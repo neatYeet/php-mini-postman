@@ -74,7 +74,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_SERVER['CONTENT_TYPE']) && 
             CURLOPT_URL => $url,
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_FOLLOWLOCATION => true,
-            CURLOPT_TIMEOUT => 30,
+            CURLOPT_TIMEOUT => 0,
             CURLOPT_SSL_VERIFYPEER => false,
             CURLOPT_USERAGENT => 'PHP CRUD Tester/1.0',
             CURLOPT_HEADER => true,
