@@ -49,6 +49,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_GET['action']) && $_GET['ac
     exit;
 }
 
+if (isset($_GET['action']) && $_GET['action'] === 'download_file' && isset($_GET['file'])) {
+    $filePath = base64_decode($_GET['file']);
+    if (file_exists($filePath)) {
+        header('Content-Description: File Transfer');
+        header('Content-Type: application/octet-stream');
+        header('Content-Disposition: attachment; filename="' . basename($filePath) . '"');
+        header('Expires: 0');
+        header('Cache-Control: must-revalidate');
+        header('Pragma: public');
+        header('Content-Length: ' . filesize($filePath));
+        readfile($filePath);
+        exit;
+    } else {
+        http_response_code(404);
+        echo "File not found.";
+        exit;
+    }
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_SERVER['CONTENT_TYPE']) && strpos($_SERVER['CONTENT_TYPE'], 'application/json') !== false) {
     $input = json_decode(file_get_contents('php://input'), true);
 
@@ -146,28 +165,102 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_SERVER['CONTENT_TYPE']) && 
             $response_headers = substr($response_raw, 0, $header_size);
             $response_body_content = substr($response_raw, $header_size);
 
-            $decodedResponse = json_decode($response_body_content, true);
-            $formattedResponse = json_last_error() === JSON_ERROR_NONE
-                ? json_encode($decodedResponse, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)
-                : $response_body_content;
+            $content_type = $curl_info['content_type'];
+            $is_file_download = false;
+            $file_path = '';
 
-            $result = [
-                'success' => $curl_info['http_code'] >= 200 && $curl_info['http_code'] < 300,
-                'status_code' => $curl_info['http_code'],
-                'body' => $formattedResponse,
-                'debug' => [
-                    'request_to_target_api' => $debug_info['curl_settings'],
-                    'curl_error' => $debug_info['curl_error'],
-                    'response_headers_received' => $response_headers,
-                    'response_info' => $curl_info
-                ]
-            ];
+            // Check if the response is a file (e.g., based on content-type or a specific header)
+            // For simplicity, let's assume if content-type is not text/html or application/json, it's a file
+            if (strpos($content_type, 'text/html') === false && strpos($content_type, 'application/json') === false && !empty($response_body_content)) {
+                // Attempt to save the file temporarily
+                $temp_dir = 'temp_downloads';
+                if (!is_dir($temp_dir)) {
+                    mkdir($temp_dir, 0777, true);
+                }
+                $file_extension = mime_content_type_to_extension($content_type);
+                $filename = 'download_' . uniqid() . ($file_extension ? '.' . $file_extension : '');
+                $file_path = $temp_dir . '/' . $filename;
+                if (file_put_contents($file_path, $response_body_content) !== false) {
+                    $is_file_download = true;
+                } else {
+                    error_log("Failed to save downloaded file to: " . $file_path);
+                }
+            }
+
+            if ($is_file_download) {
+                $result = [
+                    'success' => true,
+                    'status_code' => $curl_info['http_code'],
+                    'is_file' => true,
+                    'file_name' => basename($file_path),
+                    'file_path_encoded' => base64_encode($file_path),
+                    'debug' => [
+                        'request_to_target_api' => $debug_info['curl_settings'],
+                        'curl_error' => $debug_info['curl_error'],
+                        'response_headers_received' => $response_headers,
+                        'response_info' => $curl_info
+                    ]
+                ];
+            } else {
+                $decodedResponse = json_decode($response_body_content, true);
+                $formattedResponse = json_last_error() === JSON_ERROR_NONE
+                    ? json_encode($decodedResponse, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)
+                    : $response_body_content;
+
+                $result = [
+                    'success' => $curl_info['http_code'] >= 200 && $curl_info['http_code'] < 300,
+                    'status_code' => $curl_info['http_code'],
+                    'body' => $formattedResponse,
+                    'debug' => [
+                        'request_to_target_api' => $debug_info['curl_settings'],
+                        'curl_error' => $debug_info['curl_error'],
+                        'response_headers_received' => $response_headers,
+                        'response_info' => $curl_info
+                    ]
+                ];
+            }
         }
 
         header('Content-Type: application/json');
         echo json_encode($result);
         exit;
     }
+}
+
+// Helper function to get file extension from MIME type
+function mime_content_type_to_extension($mime_type) {
+    $mime_map = [
+        'application/json' => 'json',
+        'application/xml' => 'xml',
+        'application/pdf' => 'pdf',
+        'application/zip' => 'zip',
+        'application/gzip' => 'gz',
+        'application/x-tar' => 'tar',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' => 'xlsx',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document' => 'docx',
+        'application/vnd.openxmlformats-officedocument.presentationml.presentation' => 'pptx',
+        'image/jpeg' => 'jpeg',
+        'image/png' => 'png',
+        'image/gif' => 'gif',
+        'image/svg+xml' => 'svg',
+        'text/plain' => 'txt',
+        'text/csv' => 'csv',
+        'text/xml' => 'xml',
+        'text/css' => 'css',
+        'text/javascript' => 'js',
+        'application/octet-stream' => 'bin',
+        'model/step' => 'step', // Added for .step files
+        'model/iges' => 'iges', // Added for .iges files
+        'application/x-dxf' => 'dxf', // Added for .dxf files
+        'application/vnd.collada+xml' => 'dae', // Added for .dae files
+        'application/x-stl' => 'stl', // Added for .stl files
+        'application/x-obj' => 'obj', // Added for .obj files
+        'application/x-3ds' => '3ds', // Added for .3ds files
+        'application/x-fbx' => 'fbx', // Added for .fbx files
+        'application/x-gltf' => 'gltf', // Added for .gltf files
+        'application/x-glb' => 'glb', // Added for .glb files
+    ];
+    return $mime_map[$mime_type] ?? null;
 }
 ?>
 <!DOCTYPE html>
@@ -593,6 +686,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_SERVER['CONTENT_TYPE']) && 
                     <div class="response-header">
                         <h3>Response</h3>
                         <span id="status-code" class="status-code"></span>
+                        <button id="download-button" class="btn btn-primary" style="display: none;">Download File</button>
                     </div>
                     <div class="response-body-wrapper">
                         <div id="response-body"></div>
@@ -798,8 +892,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_SERVER['CONTENT_TYPE']) && 
             statusCodeEl.textContent = data.status_code;
             statusCodeEl.className = `status-code ${data.success ? 'status-success' : 'status-error'}`;
 
-            const debugInfo = data.debug ? `<details><summary>Debug Info</summary><pre>${JSON.stringify(data.debug, null, 2)}</pre></details>` : '';
-            document.getElementById('response-body').innerHTML = `<pre>${data.body}</pre>${debugInfo}`;
+            const responseBodyEl = document.getElementById('response-body');
+            const downloadButton = document.getElementById('download-button');
+
+            if (data.is_file) {
+                responseBodyEl.innerHTML = `<p>File ready for download: <strong>${data.file_name}</strong></p>`;
+                downloadButton.style.display = 'inline-block';
+                downloadButton.onclick = () => {
+                    window.location.href = `${window.location.href}?action=download_file&file=${data.file_path_encoded}`;
+                };
+            } else {
+                const debugInfo = data.debug ? `<details><summary>Debug Info</summary><pre>${JSON.stringify(data.debug, null, 2)}</pre></details>` : '';
+                responseBodyEl.innerHTML = `<pre>${data.body}</pre>${debugInfo}`;
+                downloadButton.style.display = 'none';
+            }
         };
 
         const loadSavedRequests = async () => {
