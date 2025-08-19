@@ -145,7 +145,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_SERVER['CONTENT_TYPE']) && 
             'Body_Sent' => ($method === 'POST' || $method === 'PUT' || $method === 'DELETE') ? $body : null
         ];
 
+        $start_time = microtime(true);
         $response_raw = curl_exec($ch);
+        $end_time = microtime(true);
+        $request_duration = round(($end_time - $start_time) * 1000); // in milliseconds
+
         $curl_info = curl_getinfo($ch);
         $error = curl_error($ch);
         curl_close($ch);
@@ -198,7 +202,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_SERVER['CONTENT_TYPE']) && 
                         'request_to_target_api' => $debug_info['curl_settings'],
                         'curl_error' => $debug_info['curl_error'],
                         'response_headers_received' => $response_headers,
-                        'response_info' => $curl_info
+                        'response_info' => $curl_info,
+                        'request_duration_ms' => $request_duration
                     ]
                 ];
             } else {
@@ -210,12 +215,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_SERVER['CONTENT_TYPE']) && 
                 $result = [
                     'success' => $curl_info['http_code'] >= 200 && $curl_info['http_code'] < 300,
                     'status_code' => $curl_info['http_code'],
+                    'request_duration_ms' => $request_duration,
                     'body' => $formattedResponse,
                     'debug' => [
                         'request_to_target_api' => $debug_info['curl_settings'],
                         'curl_error' => $debug_info['curl_error'],
                         'response_headers_received' => $response_headers,
-                        'response_info' => $curl_info
+                        'response_info' => $curl_info,
+                        'request_duration_ms' => $request_duration
                     ]
                 ];
             }
@@ -889,7 +896,11 @@ function mime_content_type_to_extension($mime_type) {
             document.getElementById('response-content').style.display = 'flex';
 
             const statusCodeEl = document.getElementById('status-code');
-            statusCodeEl.textContent = data.status_code;
+            let statusText = data.status_code;
+            if (data.request_duration_ms !== undefined) {
+                statusText += ` (${data.request_duration_ms}ms)`;
+            }
+            statusCodeEl.textContent = statusText;
             statusCodeEl.className = `status-code ${data.success ? 'status-success' : 'status-error'}`;
 
             const responseBodyEl = document.getElementById('response-body');
