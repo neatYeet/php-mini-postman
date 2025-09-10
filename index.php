@@ -756,7 +756,9 @@ function mime_content_type_to_extension($mime_type) {
 
         const loadGlobalVariables = async () => {
             try {
-                const response = await fetch(window.location.href + '?action=load_variables');
+                const url = new URL(window.location.href);
+                url.searchParams.set('action', 'load_variables');
+                const response = await fetch(url.toString());
                 variables = await response.json();
                 renderVariables();
             } catch (error) {
@@ -766,7 +768,9 @@ function mime_content_type_to_extension($mime_type) {
         };
 
         const persistGlobalVariables = () => {
-            return fetch(window.location.href + '?action=save_variables', {
+            const url = new URL(window.location.href);
+            url.searchParams.set('action', 'save_variables');
+            return fetch(url.toString(), {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
@@ -911,7 +915,10 @@ function mime_content_type_to_extension($mime_type) {
                 responseBodyEl.innerHTML = `<p>File ready for download: <strong>${data.file_name}</strong></p>`;
                 downloadButton.style.display = 'inline-block';
                 downloadButton.onclick = () => {
-                    window.location.href = `${window.location.href}?action=download_file&file=${data.file_path_encoded}`;
+                    const url = new URL(window.location.href);
+                    url.searchParams.set('action', 'download_file');
+                    url.searchParams.set('file', data.file_path_encoded);
+                    window.location.href = url.toString();
                 };
             } else {
                 const debugInfo = data.debug ? `<details><summary>Debug Info</summary><pre>${JSON.stringify(data.debug, null, 2)}</pre></details>` : '';
@@ -956,11 +963,29 @@ function mime_content_type_to_extension($mime_type) {
 
         const loadSavedRequests = async () => {
             try {
-                const response = await fetch(window.location.href + '?action=load_requests');
+                const url = new URL(window.location.href);
+                url.searchParams.set('action', 'load_requests');
+                const response = await fetch(url.toString());
                 savedRequests = await response.json();
+
+                // Backward compatibility: Add IDs to existing requests that don't have them
+                let shouldSave = false;
+                savedRequests.forEach((req, index) => {
+                    if (!req.id) {
+                        req.id = `legacy_${index}_${Date.now()}`;
+                        shouldSave = true;
+                    }
+                });
+
                 populateRequestsDropdown();
+
+                // Save the requests with IDs if any were added
+                if (shouldSave) {
+                    await persistSavedRequests();
+                }
             } catch (error) {
                 console.error('Error loading saved requests:', error);
+                savedRequests = [];
             }
         };
 
@@ -969,63 +994,13 @@ function mime_content_type_to_extension($mime_type) {
             dropdown.innerHTML = '<option value="">-- Load Request --</option>';
             savedRequests.forEach((req, index) => {
                 const option = document.createElement('option');
-                option.value = index;
+                option.value = req.id;
                 option.textContent = req.name || `${req.method} ${req.url}`;
                 dropdown.appendChild(option);
             });
         };
 
-        const saveCurrentRequest = async () => {
-            const url = document.getElementById('url').value;
-            if (!url) return alert('URL is required to save.');
-
-            const name = prompt('Enter a name for this request:', `${document.getElementById('method').value} ${url.substring(0, 50)}`);
-            if (!name) return;
-
-            const headersState = {};
-            document.querySelectorAll('#headers-list .predefined-header').forEach(row => {
-                headersState[row.dataset.key] = {
-                    active: row.querySelector('input[type="checkbox"]').checked,
-                    value: row.querySelector('.value-input').value
-                };
-            });
-
-            const currentRequest = {
-                name,
-                method: document.getElementById('method').value,
-                url: url,
-                params: Object.fromEntries([...document.querySelectorAll('input[name="param_key[]"]')].map((k, i) => [k.value, document.querySelectorAll('input[name="param_value[]"]')[i].value]).filter(([k]) => k)),
-                headers: Object.fromEntries([...document.querySelectorAll('#headers-list .kv-row:not(.predefined-header) input[name="header_key[]"]')].map((k, i) => [k.value, document.querySelectorAll('#headers-list .kv-row:not(.predefined-header) input[name="header_value[]"]')[i].value]).filter(([k]) => k)),
-                predefinedHeaders: headersState,
-                body: document.getElementById('jsonBody').value,
-                variables: {
-                    ...variables
-                }
-            };
-
-            savedRequests.push(currentRequest);
-            await persistSavedRequests();
-            populateRequestsDropdown();
-            alert('Request saved!');
-        };
-
-        const persistSavedRequests = () => {
-            return fetch(window.location.href + '?action=save_requests', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(savedRequests)
-            }).catch(err => console.error('Failed to save:', err));
-        }
-
-        const loadSelectedRequest = () => {
-            const index = document.getElementById('savedRequestsDropdown').value;
-            if (index === '') return;
-
-            const req = savedRequests[parseInt(index)];
-            if (!req) return;
-
+        const loadRequest = (req) => {
             document.getElementById('method').value = req.method;
             document.getElementById('url').value = req.url;
             document.getElementById('jsonBody').value = req.body || '';
@@ -1047,29 +1022,130 @@ function mime_content_type_to_extension($mime_type) {
             alert(`Request "${req.name}" loaded.`);
         };
 
-        const deleteSelectedRequest = async () => {
-            const index = document.getElementById('savedRequestsDropdown').value;
-            if (index === '') return;
-            const reqName = savedRequests[parseInt(index)].name;
-            if (confirm(`Delete "${reqName}"?`)) {
-                savedRequests.splice(parseInt(index), 1);
-                await persistSavedRequests();
-                populateRequestsDropdown();
-                alert(`Request "${reqName}" deleted.`);
+        const saveCurrentRequest = async () => {
+            const url = document.getElementById('url').value;
+            if (!url) return alert('URL is required to save.');
+
+            const name = prompt('Enter a name for this request:', `${document.getElementById('method').value} ${url.substring(0, 50)}`);
+            if (!name) return;
+
+            const headersState = {};
+            document.querySelectorAll('#headers-list .predefined-header').forEach(row => {
+                headersState[row.dataset.key] = {
+                    active: row.querySelector('input[type="checkbox"]').checked,
+                    value: row.querySelector('.value-input').value
+                };
+            });
+
+            const currentRequest = {
+                id: Date.now().toString(), // Add unique ID
+                name,
+                method: document.getElementById('method').value,
+                url: url,
+                params: Object.fromEntries([...document.querySelectorAll('input[name="param_key[]"]')].map((k, i) => [k.value, document.querySelectorAll('input[name="param_value[]"]')[i].value]).filter(([k]) => k)),
+                headers: Object.fromEntries([...document.querySelectorAll('#headers-list .kv-row:not(.predefined-header) input[name="header_key[]"]')].map((k, i) => [k.value, document.querySelectorAll('#headers-list .kv-row:not(.predefined-header) input[name="header_value[]"]')[i].value]).filter(([k]) => k)),
+                predefinedHeaders: headersState,
+                body: document.getElementById('jsonBody').value,
+                variables: {
+                    ...variables
+                }
+            };
+
+            savedRequests.push(currentRequest);
+            await persistSavedRequests();
+            populateRequestsDropdown();
+
+            // Update browser URL with request ID for preservation on refresh
+            if (window.history && window.history.replaceState) {
+                const newUrl = new URL(window.location);
+                newUrl.searchParams.set('request', currentRequest.id);
+                history.replaceState(history.state, '', newUrl);
+            }
+
+            alert('Request saved!');
+        };
+
+        const persistSavedRequests = () => {
+            const url = new URL(window.location.href);
+            url.searchParams.set('action', 'save_requests');
+            return fetch(url.toString(), {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(savedRequests)
+            }).catch(err => console.error('Failed to save:', err));
+        }
+
+        const loadSelectedRequest = () => {
+            const selectedId = document.getElementById('savedRequestsDropdown').value;
+            if (selectedId === '') return;
+
+            const req = savedRequests.find(r => r.id == selectedId);
+            if (!req) return;
+
+            loadRequest(req);
+
+            // Update URL with request ID for persistence on refresh
+            if (window.history && window.history.replaceState) {
+                const newUrl = new URL(window.location);
+                newUrl.searchParams.set('request', selectedId);
+                history.replaceState(history.state, '', newUrl);
             }
         };
 
-        window.addEventListener('load', () => {
+        const deleteSelectedRequest = async () => {
+            const selectedId = document.getElementById('savedRequestsDropdown').value;
+            if (selectedId === '') return;
+
+            const reqIndex = savedRequests.findIndex(r => r.id == selectedId);
+            if (reqIndex === -1) return;
+
+            const req = savedRequests[reqIndex];
+            if (confirm(`Delete "${req.name}"?`)) {
+                savedRequests.splice(reqIndex, 1);
+                await persistSavedRequests();
+                populateRequestsDropdown();
+
+                // Clear URL parameter if the deleted request was active
+                if (window.history && window.history.replaceState) {
+                    const currentUrl = new URL(window.location);
+                    if (currentUrl.searchParams.get('request') === selectedId) {
+                        currentUrl.searchParams.delete('request');
+                        history.replaceState(history.state, '', currentUrl);
+                    }
+                }
+
+                alert(`Request "${req.name}" deleted.`);
+            }
+        };
+
+        window.addEventListener('load', async () => {
             renderMethods();
             renderPredefinedHeaders();
-            loadSavedRequests();
-            loadGlobalVariables();
+            await loadSavedRequests();
+            await loadGlobalVariables();
+
             document.getElementById('newVarKey').addEventListener('keydown', e => {
                 if (e.key === 'Enter') addVariable();
             });
             document.getElementById('newVarValue').addEventListener('keydown', e => {
                 if (e.key === 'Enter') addVariable();
             });
+
+            // Load request from URL parameter if present
+            // Use setTimeout to ensure DOM is fully ready
+            setTimeout(() => {
+                const urlParams = new URLSearchParams(window.location.search);
+                const requestId = urlParams.get('request');
+                if (requestId) {
+                    const req = savedRequests.find(r => r.id == requestId);
+                    if (req) {
+                        loadRequest(req);
+                        document.getElementById('savedRequestsDropdown').value = requestId;
+                    }
+                }
+            }, 100);
         });
     </script>
 </body>
