@@ -636,11 +636,13 @@ function mime_content_type_to_extension($mime_type) {
 <body>
     <div class="container">
         <header class="header">
-            <h1>API Tester</h1>
+            <h1>API Tester <span id="loadedRequestIndicator" style="font-size: 0.8em; opacity: 0.7;"></span></h1>
             <div class="save-load-section">
                 <select id="savedRequestsDropdown"></select>
                 <button type="button" class="btn btn-secondary" onclick="loadSelectedRequest()">Load</button>
-                <button type="button" class="btn btn-secondary" onclick="saveCurrentRequest()">Save</button>
+                <button type="button" id="saveButton" class="btn btn-secondary" onclick="currentLoadedRequestId ? updateCurrentRequest() : saveCurrentRequest()">Save</button>
+                <button type="button" id="saveAsButton" class="btn btn-secondary" onclick="saveAsNewRequest()" style="display: none;">Save As</button>
+                <button type="button" id="saveNewButton" class="btn btn-secondary" onclick="saveCurrentRequest()" style="display: none;">Save New</button>
                 <button type="button" class="btn btn-danger" onclick="deleteSelectedRequest()">Delete</button>
             </div>
         </header>
@@ -674,12 +676,12 @@ function mime_content_type_to_extension($mime_type) {
 
                     <div id="params-tab" class="tab-content active">
                         <div id="params-list" class="key-value-container"></div>
-                        <button type="button" class="btn btn-add" onclick="addParam()">+ Add Parameter</button>
+                        <button type="button" class="btn btn-add" onclick="addParam(); clearLoadedRequest()">+ Add Parameter</button>
                     </div>
 
                     <div id="headers-tab" class="tab-content">
                         <div id="headers-list" class="key-value-container"></div>
-                        <button type="button" class="btn btn-add" onclick="addHeader()">+ Add Custom Header</button>
+                        <button type="button" class="btn btn-add" onclick="addHeader(); clearLoadedRequest()">+ Add Custom Header</button>
                     </div>
 
                     <div id="body-tab" class="tab-content">
@@ -710,6 +712,7 @@ function mime_content_type_to_extension($mime_type) {
     <script>
         let variables = {};
         let savedRequests = [];
+        let currentLoadedRequestId = null;
 
         const switchTab = (event, tabName) => {
             document.querySelectorAll('.tab').forEach(tab => tab.classList.remove('active'));
@@ -756,6 +759,86 @@ function mime_content_type_to_extension($mime_type) {
         const updateVariableValue = async (key, value) => {
             variables[key] = value;
             await persistGlobalVariables();
+        };
+
+        const updateSaveButtons = () => {
+            const saveButton = document.getElementById('saveButton');
+            const saveAsButton = document.getElementById('saveAsButton');
+            const saveNewButton = document.getElementById('saveNewButton');
+            const indicator = document.getElementById('loadedRequestIndicator');
+
+            if (currentLoadedRequestId) {
+                const req = savedRequests.find(r => r.id == currentLoadedRequestId);
+                if (req) {
+                    indicator.textContent = `| Loaded: ${req.name}`;
+                } else {
+                    indicator.textContent = '| Loaded: [Request not found]';
+                }
+                saveButton.textContent = 'Update Request';
+                saveButton.style.display = 'inline-block';
+                saveAsButton.style.display = 'inline-block';
+                saveNewButton.style.display = 'none';
+            } else {
+                indicator.textContent = '';
+                saveButton.textContent = 'Save Request';
+                saveButton.style.display = 'inline-block';
+                saveAsButton.style.display = 'none';
+                saveNewButton.style.display = 'inline-block';
+            }
+        };
+
+        const updateCurrentRequest = async () => {
+            const url = document.getElementById('url').value;
+            if (!url) return alert('URL is required to update.');
+
+            if (!currentLoadedRequestId) {
+                alert('No loaded request to update.');
+                return;
+            }
+
+            const reqIndex = savedRequests.findIndex(r => r.id == currentLoadedRequestId);
+            if (reqIndex === -1) {
+                alert('Request not found.');
+                currentLoadedRequestId = null;
+                updateSaveButtons();
+                return;
+            }
+
+            const headersState = {};
+            document.querySelectorAll('#headers-list .predefined-header').forEach(row => {
+                headersState[row.dataset.key] = {
+                    active: row.querySelector('input[type="checkbox"]').checked,
+                    value: row.querySelector('.value-input').value
+                };
+            });
+
+            savedRequests[reqIndex] = {
+                ...savedRequests[reqIndex],
+                method: document.getElementById('method').value,
+                url: url,
+                params: Object.fromEntries([...document.querySelectorAll('input[name="param_key[]"]')].map((k, i) => [k.value, document.querySelectorAll('input[name="param_value[]"]')[i].value]).filter(([k]) => k)),
+                headers: Object.fromEntries([...document.querySelectorAll('#headers-list .kv-row:not(.predefined-header) input[name="header_key[]"]')].map((k, i) => [k.value, document.querySelectorAll('#headers-list .kv-row:not(.predefined-header) input[name="header_value[]"]')[i].value]).filter(([k]) => k)),
+                predefinedHeaders: headersState,
+                body: document.getElementById('jsonBody').value,
+                variables: {
+                    ...variables
+                }
+            };
+
+            await persistSavedRequests();
+            populateRequestsDropdown();
+
+            alert(`Request "${savedRequests[reqIndex].name}" updated successfully!`);
+        };
+
+        const saveAsNewRequest = async () => {
+            currentLoadedRequestId = null;
+            await saveCurrentRequest(true); // true flag to indicate it's a save as operation
+        };
+
+        const clearLoadedRequest = () => {
+            currentLoadedRequestId = null;
+            updateSaveButtons();
         };
 
         const renderVariables = () => {
@@ -812,9 +895,9 @@ function mime_content_type_to_extension($mime_type) {
             const row = document.createElement('div');
             row.className = 'kv-row';
             row.innerHTML = `
-                <input type="text" placeholder="Key" name="${type}_key[]" value="${key}" class="key-input">
-                <input type="text" placeholder="Value" name="${type}_value[]" value="${value}" class="value-input">
-                <button type="button" class="btn btn-danger" onclick="this.parentElement.remove()">Remove</button>
+                <input type="text" placeholder="Key" name="${type}_key[]" value="${key}" class="key-input" oninput="clearLoadedRequest()">
+                <input type="text" placeholder="Value" name="${type}_value[]" value="${value}" class="value-input" oninput="clearLoadedRequest()">
+                <button type="button" class="btn btn-danger" onclick="this.parentElement.remove(); clearLoadedRequest()">Remove</button>
             `;
             list.appendChild(row);
         };
@@ -850,6 +933,7 @@ function mime_content_type_to_extension($mime_type) {
 
             valueInput.disabled = !isActive;
             row.classList.toggle('inactive', !isActive);
+            clearLoadedRequest();
         };
 
         document.getElementById('apiForm').addEventListener('submit', function(e) {
@@ -1016,6 +1100,9 @@ function mime_content_type_to_extension($mime_type) {
         };
 
         const loadRequest = (req) => {
+            currentLoadedRequestId = req.id;
+            updateSaveButtons();
+
             document.getElementById('method').value = req.method;
             document.getElementById('url').value = req.url;
             document.getElementById('jsonBody').value = req.body || '';
@@ -1037,11 +1124,19 @@ function mime_content_type_to_extension($mime_type) {
             alert(`Request "${req.name}" loaded.`);
         };
 
-        const saveCurrentRequest = async () => {
+        const saveCurrentRequest = async (isSaveAsNew = false) => {
             const url = document.getElementById('url').value;
             if (!url) return alert('URL is required to save.');
 
-            const name = prompt('Enter a name for this request:', `${document.getElementById('method').value} ${url.substring(0, 50)}`);
+            let defaultName = '';
+            if (currentLoadedRequestId && !isSaveAsNew) {
+                const existingReq = savedRequests.find(r => r.id == currentLoadedRequestId);
+                defaultName = existingReq ? existingReq.name : '';
+            } else {
+                defaultName = `${document.getElementById('method').value} ${url.substring(0, 50)}`;
+            }
+
+            const name = prompt('Enter a name for this request:', defaultName);
             if (!name) return;
 
             const headersState = {};
@@ -1070,6 +1165,11 @@ function mime_content_type_to_extension($mime_type) {
             await persistSavedRequests();
             populateRequestsDropdown();
 
+            // If this was a save as new operation, update the loaded request ID
+            if (isSaveAsNew) {
+                currentLoadedRequestId = currentRequest.id;
+            }
+
             // Update browser URL with request ID for preservation on refresh
             if (window.history && window.history.replaceState) {
                 const newUrl = new URL(window.location);
@@ -1077,7 +1177,8 @@ function mime_content_type_to_extension($mime_type) {
                 history.replaceState(history.state, '', newUrl);
             }
 
-            alert('Request saved!');
+            updateSaveButtons();
+            alert(isSaveAsNew ? 'Request saved as new!' : 'Request saved!');
         };
 
         const persistSavedRequests = () => {
@@ -1099,6 +1200,7 @@ function mime_content_type_to_extension($mime_type) {
             const req = savedRequests.find(r => r.id == selectedId);
             if (!req) return;
 
+            currentLoadedRequestId = selectedId;
             loadRequest(req);
 
             // Update URL with request ID for persistence on refresh
@@ -1140,6 +1242,7 @@ function mime_content_type_to_extension($mime_type) {
             renderPredefinedHeaders();
             await loadSavedRequests();
             await loadGlobalVariables();
+            updateSaveButtons();
 
             document.getElementById('newVarKey').addEventListener('keydown', e => {
                 if (e.key === 'Enter') addVariable();
@@ -1156,11 +1259,17 @@ function mime_content_type_to_extension($mime_type) {
                 if (requestId) {
                     const req = savedRequests.find(r => r.id == requestId);
                     if (req) {
+                        currentLoadedRequestId = requestId;
                         loadRequest(req);
                         document.getElementById('savedRequestsDropdown').value = requestId;
                     }
                 }
             }, 100);
+
+            // Add event listeners to clear loaded request when form changes
+            document.getElementById('method').addEventListener('change', clearLoadedRequest);
+            document.getElementById('url').addEventListener('input', clearLoadedRequest);
+            document.getElementById('jsonBody').addEventListener('input', clearLoadedRequest);
         });
     </script>
 </body>
