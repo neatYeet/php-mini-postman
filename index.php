@@ -693,6 +693,7 @@ function mime_content_type_to_extension($mime_type) {
                     <div class="response-header">
                         <h3>Response</h3>
                         <span id="status-code" class="status-code"></span>
+                        <button id="copy-button" class="btn btn-secondary" onclick="copyResponseToClipboard()">Copy Response</button>
                         <button id="download-button" class="btn btn-primary" style="display: none;">Download File</button>
                     </div>
                     <div class="response-body-wrapper">
@@ -917,6 +918,40 @@ function mime_content_type_to_extension($mime_type) {
                 responseBodyEl.innerHTML = `<pre>${data.body}</pre>${debugInfo}`;
                 downloadButton.style.display = 'none';
             }
+        };
+
+        const copyResponseToClipboard = () => {
+            const responseBodyEl = document.getElementById('response-body');
+            const preElement = responseBodyEl.querySelector('pre');
+            const text = preElement ? preElement.textContent : (responseBodyEl.textContent || responseBodyEl.innerText);
+            if (navigator.clipboard && window.isSecureContext) {
+                navigator.clipboard.writeText(text).then(() => {
+                    alert('Response copied to clipboard!');
+                }).catch(err => {
+                    console.error('Failed to copy text: ', err);
+                    fallbackCopyTextToClipboard(text);
+                });
+            } else {
+                fallbackCopyTextToClipboard(text);
+            }
+        };
+
+        const fallbackCopyTextToClipboard = (text) => {
+            const textArea = document.createElement('textarea');
+            textArea.value = text;
+            textArea.style.top = '0';
+            textArea.style.left = '0';
+            textArea.style.position = 'fixed';
+            document.body.appendChild(textArea);
+            textArea.focus();
+            textArea.select();
+            try {
+                document.execCommand('copy');
+                alert('Response copied to clipboard!');
+            } catch (err) {
+                console.error('Fallback: Oops, unable to copy', err);
+            }
+            document.body.removeChild(textArea);
         };
 
         const loadSavedRequests = async () => {
