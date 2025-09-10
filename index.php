@@ -737,9 +737,24 @@ function mime_content_type_to_extension($mime_type) {
             }
         };
 
-        const deleteVariable = async (key) => {
+        const deleteVariable = async (button) => {
+            const key = button.previousElementSibling.previousElementSibling.value;
             delete variables[key];
             renderVariables();
+            await persistGlobalVariables();
+        };
+
+        const updateVariableKey = async (oldKey, newKey) => {
+            if (newKey && newKey !== oldKey && newKey !== '' && !variables.hasOwnProperty(newKey)) {
+                variables[newKey] = variables[oldKey];
+                delete variables[oldKey];
+                renderVariables();
+                await persistGlobalVariables();
+            }
+        };
+
+        const updateVariableValue = async (key, value) => {
+            variables[key] = value;
             await persistGlobalVariables();
         };
 
@@ -747,9 +762,9 @@ function mime_content_type_to_extension($mime_type) {
             const list = document.getElementById('variables-list');
             list.innerHTML = Object.entries(variables).map(([key, value]) => `
                 <div class="kv-row">
-                    <input type="text" value="${key}" class="key-input" readonly>
-                    <input type="text" value="${value}" class="value-input" readonly>
-                    <button class="btn btn-danger" onclick="deleteVariable('${key}')">X</button>
+                    <input type="text" value="${key}" class="key-input" onchange="updateVariableKey('${key}', this.value)">
+                    <input type="text" value="${value}" class="value-input" onchange="updateVariableValue('${key}', this.value)">
+                    <button class="btn btn-danger" onclick="deleteVariable(this)">X</button>
                 </div>
             `).join('');
         };
